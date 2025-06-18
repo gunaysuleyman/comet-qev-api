@@ -20,18 +20,17 @@ if torch.cuda.is_available():
     print(f"GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f} GB")
 
 print("Loading COMET model...")
-comet_metric = load('comet')
-
 try:
-    if torch.cuda.is_available() and hasattr(comet_metric, 'model'):
-        print("Attempting to move COMET model to GPU...")
-        comet_metric.model = comet_metric.model.to(device)
-        print("COMET model successfully moved to GPU!")
+    if torch.cuda.is_available():
+        comet_metric = load('comet', device=0)
+        print("COMET model loaded directly on GPU!")
     else:
-        print("COMET model running on CPU")
+        comet_metric = load('comet')
+        print("COMET model loaded on CPU")
 except Exception as e:
-    print(f"Failed to move model to GPU, falling back to CPU: {e}")
-    device = torch.device("cpu")
+    print(f"Failed to load on GPU, loading on CPU: {e}")
+    comet_metric = load('comet')
+    print("COMET model loaded on CPU (fallback)")
 
 app = FastAPI()
 
