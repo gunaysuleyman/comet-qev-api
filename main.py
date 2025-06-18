@@ -4,13 +4,34 @@ from evaluate import load
 from typing import List
 from fastapi import FastAPI
 from pydantic import BaseModel
+import torch
 
 class InputData(BaseModel):
     source: List[str]
     hypothesis: List[str]
     reference: List[str]
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(f"CUDA available: {torch.cuda.is_available()}")
+print(f"Using device: {device}")
+
+if torch.cuda.is_available():
+    print(f"GPU: {torch.cuda.get_device_name(0)}")
+    print(f"GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f} GB")
+
+print("Loading COMET model...")
 comet_metric = load('comet')
+
+try:
+    if torch.cuda.is_available() and hasattr(comet_metric, 'model'):
+        print("Attempting to move COMET model to GPU...")
+        comet_metric.model = comet_metric.model.to(device)
+        print("COMET model successfully moved to GPU!")
+    else:
+        print("COMET model running on CPU")
+except Exception as e:
+    print(f"Failed to move model to GPU, falling back to CPU: {e}")
+    device = torch.device("cpu")
 
 app = FastAPI()
 
@@ -23,9 +44,29 @@ def process_items(data: InputData):
     except AssertionError:
         raise HTTPException(status_code=400, detail="The three groups (source, hypothesis and reference) must have the same number of segments.")
 
-    results = comet_metric.compute(
-        predictions=data.hypothesis,
-        references=data.reference,
-        sources=data.source
-    )
+    print(f"Processing {len(data.source)} samples on {device}")
+    
+    compute_kwargs = {}
+    if torch.cuda.is_available():
+        compute_kwargs['gpus'] = 1 if device.type == 'cuda' else 0
+    
+    try:
+        results = comet_metric.compute(
+            predictions=data.hypothesis,
+            references=data.reference,
+            sources=data.source,
+            **compute_kwargs
+        )
+        print(f"Evaluation completed successfully on {device}")
+    except Exception as e:
+        print(f"GPU evaluation failed, retrying on CPU: {e}")
+
+        results = comet_metric.compute(
+            predictions=data.hypothesis,
+            references=data.reference,
+            sources=data.source,
+            gpus=0
+        )
+        print("Evaluation completed on CPU fallback")
+    
     return [round(v, 3) for v in results["scores"]]
